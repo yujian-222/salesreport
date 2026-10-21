@@ -44,6 +44,18 @@ def read_source(path):
 
 
 # ---------- 2. 数据体检 ----------
+# ---------- 工具 ----------
+TEXT_COLS = ["订单号", "客户名称", "区域", "产品编码", "产品名称", "销售员"]
+MONEY_HINT = r"[,，\s¥￥元圆]"
+
+
+def to_number(series):
+    """把「1,240.00 元」这类写法转成数字，转不了返回空值"""
+    s = series.astype("string")
+    s = s.str.replace(MONEY_HINT, "", regex=True)
+    return pd.to_numeric(s, errors="coerce")
+
+
 def check_quality(raw):
     """逐项体检，返回（检查汇总表, 问题明细表）"""
     checks = []
@@ -68,9 +80,12 @@ def check_quality(raw):
     dates = pd.to_datetime(raw["下单日期"], errors="coerce")
     flag(dates.isna() & raw["下单日期"].notna(), "日期无法解析", "不是有效日期")
 
-    price = pd.to_numeric(raw["单价"], errors="coerce")
-    qty = pd.to_numeric(raw["数量"], errors="coerce")
-    amount = pd.to_numeric(raw["金额"], errors="coerce")
+    price = to_number(raw["单价"])
+    qty = to_number(raw["数量"])
+    amount = to_number(raw["金额"])
+
+    dirty_money = raw["金额"].astype("string").str.contains(MONEY_HINT, regex=True, na=False)
+    flag(dirty_money, "金额格式不规范", "含千分位、货币符号或空格，已自动清洗")
 
     flag(price.isna() & raw["单价"].notna(), "单价无法解析", "单价含非数字")
     flag(qty.isna() & raw["数量"].notna(), "数量无法解析", "数量含非数字")
@@ -95,18 +110,30 @@ def check_quality(raw):
 # ---------- 3. 清洗 ----------
 def clean(raw):
     df = raw.copy()
+
+    # 1. 文本列去掉首尾空格（含全角空格），避免同一个客户被拆成两组
+    for col in TEXT_COLS:
+        df[col] = df[col].astype("string").str.strip()
+
+    # 2. 类型转换：日期、数值（数值允许带千分位和「元」）
     df["下单日期"] = pd.to_datetime(df["下单日期"], errors="coerce")
     for col in ("单价", "数量", "金额"):
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        df[col] = to_number(df[col])
 
     before = len(df)
     df = df.drop_duplicates()
-    df = df.dropna(subset=["下单日期", "金额", "订单号", "数量"])
-    df = df[df["金额"] > 0]
+    df = df.dropna(subset=["下单日期", "单价", "数量", "订单号"])
     df = df[df["数量"] > 0]
     df = df[df["订单号"].astype(str).str.strip().ne("")]
 
+    # 3. 金额以「单价 × 数量」为准
+    corrected = int(((df["单价"] * df["数量"] - df["金额"]).abs() > 0.01).sum())
+    df["金额"] = (df["单价"] * df["数量"]).round(2)
+    df = df[df["金额"] > 0]
+
     print(f"清洗：{before} 行 → {len(df)} 行（移除 {before - len(df)} 行）")
+    if corrected:
+        print(f"金额修正：{corrected} 行按「单价 × 数量」重算")
 
     df = df.copy()
     df["月份"] = df["下单日期"].dt.strftime("%Y-%m")

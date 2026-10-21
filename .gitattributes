@@ -1,0 +1,7 @@
+# 统一换行符，避免跨平台产生整文件差异
+* text=auto
+
+# 二进制文件不做换行符转换
+*.docx binary
+*.xlsx binary
+*.png binary

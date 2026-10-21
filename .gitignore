@@ -1,0 +1,18 @@
+# 虚拟环境（体积大、与平台绑定）
+venv/
+.venv/
+
+# 编辑器
+.idea/
+.vscode/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 临时文件（Excel 打开时产生的锁文件）
+~$*.xlsx
+
+# 未使用的输出目录
+output/
+reports/
